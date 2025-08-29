@@ -1,114 +1,138 @@
-name: Continuous Integration
+name: CI
+
+permissions:
+  contents: read
 
 on:
   pull_request:
-    paths:
-      - "**.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
+  push:
+    branches:
+    - main
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  CLICOLOR: 1
 
 jobs:
-  fmt:
-    name: Source formatting check
+  ci:
+    permissions:
+      contents: none
+    name: CI
+    needs: [test, msrv, docs, rustfmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-          components: rustfmt
-
-      - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: -- --check
-
-  check:
-    name: Compilation check
-    runs-on: ubuntu-latest
+      - name: Done
+        run: exit 0
+  test:
+    name: Test
     strategy:
-      fail-fast: true
       matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
-          - 1.41.0
+        os: ["ubuntu-latest", "windows-latest", "macos-latest"]
+        rust: ["stable"]
+    continue-on-error: ${{ matrix.rust != 'stable' }}
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-
-      - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust }}
+    - uses: Swatinem/rust-cache@v2
+    - uses: taiki-e/install-action@cargo-hack
+    - name: Build
+      run: cargo test --no-run --workspace --all-features
+    - name: Test
+      run: cargo hack test --workspace --feature-powerset
+    - name: Run crate example
+      run: cargo run --example default
+  msrv:
+    name: "Check MSRV: 1.60.0"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: "1.60"  # MSRV
+    - uses: Swatinem/rust-cache@v2
+    - uses: taiki-e/install-action@cargo-hack
+    - name: Check
+      run: cargo hack check --workspace --all-targets --feature-powerset
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+    - uses: Swatinem/rust-cache@v2
+    - name: "Is lockfile updated?"
+      run: cargo fetch --locked
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Check documentation
+      env:
+        RUSTDOCFLAGS: -D warnings
+      run: cargo doc --workspace --all-features --no-deps --document-private-items
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        # Not MSRV because its harder to jump between versions and people are
+        # more likely to have stable
+        toolchain: stable
+        components: rustfmt
+    - uses: Swatinem/rust-cache@v2
+    - name: Check formatting
+      run: cargo fmt --all -- --check
   clippy:
-    name: Lint check
+    name: clippy
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write # to upload sarif results
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: clippy
-
-      - name: Run lints
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
-
-  ci-crate:
-    name: CI crate check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-
-      - name: Run ci crate
-        uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: -p ci
-
-  crate-example:
-    name: Crate example check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-
-      - name: Run crate example
-        uses: actions-rs/cargo@v1
-        with:
-          command: run
-          args: --example default
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: "1.60"  # MSRV
+        components: clippy
+    - uses: Swatinem/rust-cache@v2
+    - name: Install SARIF tools
+      run: cargo install clippy-sarif --version 0.3.4 --locked  # Held back due to msrv
+    - name: Install SARIF tools
+      run: cargo install sarif-fmt --version 0.3.4 --locked # Held back due to msrv
+    - name: Check
+      run: >
+        cargo clippy --workspace --all-features --all-targets --message-format=json -- -D warnings --allow deprecated
+        | clippy-sarif
+        | tee clippy-results.sarif
+        | sarif-fmt
+      continue-on-error: true
+    - name: Upload
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: clippy-results.sarif
+        wait-for-processing: true
+    - name: Report status
+      run: cargo clippy --workspace --all-features --all-targets -- -D warnings --allow deprecated

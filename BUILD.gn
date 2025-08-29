@@ -19,20 +19,19 @@ ohos_cargo_crate("lib") {
     crate_root = "src/lib.rs"
 
     sources = ["src/lib.rs"]
-    edition = "2018"
-    cargo_pkg_version = "0.9.3"
+    edition = "2021"
+    cargo_pkg_version = "0.10.2"
     cargo_pkg_name = "env_logger"
     deps = [
-        "//third_party/rust/crates/atty:lib",
+        "//third_party/rust/crates/is-terminal:lib",
         "//third_party/rust/crates/humantime:lib",
         "//third_party/rust/crates/log:lib",
         "//third_party/rust/crates/regex:lib",
         "//third_party/rust/crates/termcolor:lib",
     ]
     features = [
-        "atty",
+        "auto-color",
         "humantime",
         "regex",
-        "termcolor",
     ]
 }
