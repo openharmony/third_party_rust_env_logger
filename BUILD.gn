@@ -34,4 +34,7 @@ ohos_cargo_crate("lib") {
         "humantime",
         "regex",
     ]
+    module_output_extension = ".rlib"
+    part_name = "rust_env_logger"
+    subsystem_name = "thirdparty"
 }
